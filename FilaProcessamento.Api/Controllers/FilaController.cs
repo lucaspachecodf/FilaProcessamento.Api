@@ -1,6 +1,6 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Threading.Tasks;
 using FilaProcessamento.Api.Models;
 using FilaProcessamento.Domain.Dtos.Result;
 using Microsoft.AspNetCore.Mvc;
@@ -11,23 +11,30 @@ namespace FilaProcessamento.Api.Controllers
     [ApiController]
     public class FilaController : ControllerBase
     {
-        public Queue<MoedaModel> _moedaModelsQueue = new Queue<MoedaModel>();        
-        public Queue<MoedaModel> MoedaModelsQueue
+        private static ConcurrentStack<MoedaModel> _moedaModelsQueue;
+        public static ConcurrentStack<MoedaModel> MoedaModelsQueue
         {
-            get { return _moedaModelsQueue; }
-            set { _moedaModelsQueue = value; }
-        }        
+            get
+            {
+                if (_moedaModelsQueue == null)
+                    _moedaModelsQueue = new ConcurrentStack<MoedaModel>();
+                return _moedaModelsQueue;
+            }
+        }
 
         [HttpPost("AddItemFila")]
-        public async Task<IActionResult> AddItemFila([FromBody] MoedaModel moedaModel)
+        public IActionResult AddItemFila([FromBody] ICollection<MoedaModel> moedaModel)
         {
             try
             {
-                moedaModel.Validate();
-                if (moedaModel.Invalid)
-                    return BadRequest(new MessageDTO(false, moedaModel.Notifications));
-
-                _moedaModelsQueue.Enqueue(moedaModel);
+                foreach (var moeda in moedaModel)
+                {
+                    moeda.Validate();
+                    if (moeda.Invalid)
+                        return BadRequest(new MessageDTO(false, moeda.Notifications));
+                                        
+                    MoedaModelsQueue.Push(moeda);
+                }
 
                 return Ok();
             }
@@ -38,20 +45,19 @@ namespace FilaProcessamento.Api.Controllers
         }
 
         [HttpGet("GetItemFila")]
-        public async Task<IActionResult> GetItemFila()
+        public IActionResult GetItemFila()
         {
             try
             {
-                return Ok(_moedaModelsQueue.Dequeue());
+                if (MoedaModelsQueue.TryPop(out MoedaModel ultimoItem))
+                    return Ok(ultimoItem);
+
+                return BadRequest(new MessageDTO(false, "Não existe objeto a ser retornado"));
             }
             catch (Exception ex)
             {
                 return BadRequest(new MessageDTO(false, ex.Message));
             }
         }
-
-        
-        //private readonly Queue<MoedaModel> MoedaModelsQueue;
-        //private Queue<MoedaModel> MoedaModelsQueue { get; set; }        
     }
 }
